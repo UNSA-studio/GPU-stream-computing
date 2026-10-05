@@ -1,0 +1,21 @@
+modLoader="javafml"
+loaderVersion="[4,)"
+license="MIT"
+[[mods]]
+modId="gpusc"
+version="0.1.0"
+displayName="GPU Stream Computing"
+authors="UNSA Studio"
+description="Capability-aware distributed chunk pregeneration: the server only assigns work to capable machines."
+[[dependencies.gpusc]]
+    modId="neoforge"
+    type="required"
+    versionRange="[21.1,)"
+    ordering="NONE"
+    side="BOTH"
+[[dependencies.gpusc]]
+    modId="minecraft"
+    type="required"
+    versionRange="[1.21.1,1.22)"
+    ordering="NONE"
+    side="BOTH"
