@@ -1,7 +1,11 @@
 name: build
+
 on:
   push:
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -17,6 +21,15 @@ jobs:
           gradle-version: '8.8'
       - name: Build
         run: gradle build --no-daemon --stacktrace
+      - name: Publish jar to dist
+        run: |
+          mkdir -p dist
+          cp build/libs/*.jar dist/gpusc.jar
+          git config user.email UNSA-studio@outlook.com
+          git config user.name UNSA-Studio
+          git add dist
+          git diff --cached --quiet || git commit -m "chore: publish gpusc.jar"
+          git push
       - uses: actions/upload-artifact@v4
         with:
           name: gpusc-jar
