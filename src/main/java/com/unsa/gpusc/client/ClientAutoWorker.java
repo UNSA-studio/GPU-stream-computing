@@ -1,0 +1,230 @@
+package com.unsa.gpusc.client;
+
+import com.unsa.gpusc.GpuStreamComputing;
+import com.unsa.gpusc.GpuscConfig;
+
+import net.minecraft.client.Minecraft;
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.fml.common.EventBusSubscriber;
+import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
+
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
+import java.time.Duration;
+import java.util.Comparator;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
+
+/**
+ * Client side auto-worker:
+ *  - when the player joins a server, download (once) + extract the worker pack to a temp dir,
+ *    then launch a background Minecraft worker process that does chunk pregeneration;
+ *  - when the player leaves, stop the process and (optionally) delete the temp dir.
+ * Zero manual steps for the player.
+ */
+@EventBusSubscriber(modid = GpuStreamComputing.MODID, value = Dist.CLIENT)
+public final class ClientAutoWorker {
+
+    private static Process process;
+    private static boolean busy;
+
+    private ClientAutoWorker() {
+    }
+
+    @SubscribeEvent
+    public static void onJoin(ClientPlayerNetworkEvent.LoggingIn event) {
+        GpuscConfig cfg = GpuStreamComputing.CONFIG;
+        if (cfg == null || !cfg.autoWorker) {
+            return;
+        }
+        String host = "";
+        try {
+            var server = Minecraft.getInstance().getCurrentServer();
+            if (server != null) {
+                host = server.ip;
+            }
+        } catch (Throwable ignored) {
+        }
+        if (cfg.onlyOnServers != null && !cfg.onlyOnServers.isBlank()
+                && !cfg.onlyOnServers.contains(host)) {
+            GpuStreamComputing.LOGGER.info("[gpusc] 当前服务器 {} 不在白名单，跳过工人模式", host);
+            return;
+        }
+        synchronized (ClientAutoWorker.class) {
+            if (busy) {
+                return;
+            }
+            busy = true;
+        }
+        Thread t = new Thread(() -> {
+            try {
+                startWorker(cfg);
+            } catch (Throwable e) {
+                GpuStreamComputing.LOGGER.warn("[gpusc] 启动后台工人失败: {}", e.toString());
+            } finally {
+                synchronized (ClientAutoWorker.class) {
+                    busy = false;
+                }
+            }
+        }, "gpusc-client-auto-worker");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    @SubscribeEvent
+    public static void onLeave(ClientPlayerNetworkEvent.LoggingOut event) {
+        stopWorker(GpuStreamComputing.CONFIG);
+    }
+
+    private static Path workerDir(GpuscConfig cfg) {
+        String dir = (cfg.workerDir == null || cfg.workerDir.isBlank()) ? "gpusc_worker" : cfg.workerDir;
+        Path p = Paths.get(dir);
+        if (!p.isAbsolute()) {
+            p = Minecraft.getInstance().gameDirectory.toPath().resolve(dir);
+        }
+        return p;
+    }
+
+    private static void startWorker(GpuscConfig cfg) throws Exception {
+        Path dir = workerDir(cfg);
+        Files.createDirectories(dir);
+
+        // 1) make sure the pack is extracted
+        Path javaBin = dir.resolve("libraries").resolve("net").resolve("neoforged")
+                .resolve("neoforge").resolve(cfg.workerNeoVersion == null ? "21.1.250" : cfg.workerNeoVersion);
+        if (!Files.exists(javaBin)) {
+            downloadAndExtract(cfg, dir);
+        } else {
+            GpuStreamComputing.LOGGER.info("[gpusc] 工人包已就绪: {}", dir);
+        }
+
+        // 2) pick launcher args file for this OS
+        String os = System.getProperty("os.name", "").toLowerCase();
+        String argsFile = os.contains("win") ? "win_args.txt" : "unix_args.txt";
+        String version = cfg.workerNeoVersion == null ? "21.1.250" : cfg.workerNeoVersion;
+        String argsPath = dir.resolve("libraries/net/neoforged/neoforge/" + version + "/" + argsFile).toString();
+        String javaExe = Paths.get(System.getProperty("java.home"), "bin",
+                os.contains("win") ? "java.exe" : "java").toString();
+
+        ProcessBuilder pb = new ProcessBuilder(javaExe,
+                "@user_jvm_args.txt",
+                "@" + argsPath,
+                "nogui");
+        pb.directory(dir.toFile());
+        pb.redirectErrorStream(true);
+        pb.redirectOutput(ProcessBuilder.Redirect.appendTo(dir.resolve("worker.log").toFile()));
+        Process p = pb.start();
+        process = p;
+        GpuStreamComputing.LOGGER.info("[gpusc] 后台工人已启动 (pid={})，日志: {}", p.pid(), dir.resolve("worker.log"));
+
+        // reap in background
+        Thread reaper = new Thread(() -> {
+            try {
+                int code = p.waitFor();
+                GpuStreamComputing.LOGGER.info("[gpusc] 后台工人已退出 (code={})", code);
+            } catch (InterruptedException ignored) {
+            }
+        }, "gpusc-worker-reaper");
+        reaper.setDaemon(true);
+        reaper.start();
+    }
+
+    private static void downloadAndExtract(GpuscConfig cfg, Path dir) throws Exception {
+        Files.createDirectories(dir);
+        Path zip = dir.resolve("worker-pack.zip");
+        String url = cfg.workerPackUrl;
+        if (url == null || url.isBlank()) {
+            throw new IOException("未配置 workerPackUrl");
+        }
+        GpuStreamComputing.LOGGER.info("[gpusc] 首次使用，开始下载工人包: {}", url);
+        HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(20)).build();
+        HttpResponse<InputStream> resp = http.send(HttpRequest.newBuilder(URI.create(url))
+                .timeout(Duration.ofMinutes(30)).GET().build(), HttpResponse.BodyHandlers.ofInputStream());
+        long total = resp.headers().firstValueAsLong("content-length").orElse(-1L);
+        try (InputStream in = resp.body()) {
+            Files.copy(in, zip, StandardCopyOption.REPLACE_EXISTING);
+        }
+        long size = Files.size(zip);
+        GpuStreamComputing.LOGGER.info("[gpusc] 下载完成: {} ({} MB / {} MB)",
+                zip.getFileName(), size / 1048576L, total < 0 ? -1 : total / 1048576L);
+
+        GpuscConfig workerCfg = new GpuscConfig();
+        workerCfg.role = "worker";
+        workerCfg.coordinatorUrl = cfg.coordinatorUrl;
+        workerCfg.token = cfg.token;
+        workerCfg.port = 8766;
+
+        GpuStreamComputing.LOGGER.info("[gpusc] 解压工人包 -> {}", dir);
+        int count = 0;
+        try (ZipInputStream zin = new ZipInputStream(Files.newInputStream(zip))) {
+            ZipEntry e;
+            while ((e = zin.getNextEntry()) != null) {
+                Path target = dir.resolve(e.getName()).normalize();
+                if (!target.startsWith(dir)) {
+                    continue;
+                }
+                if (e.isDirectory()) {
+                    Files.createDirectories(target);
+                } else {
+                    Files.createDirectories(target.getParent());
+                    Files.copy(zin, target, StandardCopyOption.REPLACE_EXISTING);
+                    count++;
+                }
+                zin.closeEntry();
+            }
+        }
+        Files.deleteIfExists(zip);
+        GpuStreamComputing.LOGGER.info("[gpusc] 解压完成，共 {} 个文件", count);
+
+        // write our own worker config (role=worker + coordinator address)
+        Path cfgFile = dir.resolve("config/gpusc.json");
+        Files.createDirectories(cfgFile.getParent());
+        Files.writeString(cfgFile, "{\n  \"role\": \"worker\",\n  \"coordinatorUrl\": \""
+                + (cfg.coordinatorUrl == null ? "" : cfg.coordinatorUrl)
+                + "\",\n  \"token\": \"" + (cfg.token == null ? "" : cfg.token)
+                + "\",\n  \"workerName\": \"\",\n  \"port\": 8766\n}\n");
+    }
+
+    private static void stopWorker(GpuscConfig cfg) {
+        Process p = process;
+        if (p != null) {
+            p.destroy();
+            try {
+                if (!p.waitFor(20, java.util.concurrent.TimeUnit.SECONDS)) {
+                    p.destroyForcibly();
+                }
+            } catch (InterruptedException ignored) {
+            }
+            process = null;
+            GpuStreamComputing.LOGGER.info("[gpusc] 后台工人已停止");
+        }
+        if (cfg != null && cfg.autoWorker && !cfg.keepWorkerDir) {
+            try {
+                Path dir = workerDir(cfg);
+                if (Files.exists(dir)) {
+                    try (var s = Files.walk(dir)) {
+                        s.sorted(Comparator.reverseOrder()).forEach(pp -> {
+                            try {
+                                Files.deleteIfExists(pp);
+                            } catch (IOException ignored) {
+                            }
+                        });
+                    }
+                    GpuStreamComputing.LOGGER.info("[gpusc] 已清理临时工人目录: {}", dir);
+                }
+            } catch (Throwable t) {
+                GpuStreamComputing.LOGGER.warn("[gpusc] 清理工人目录失败: {}", t.toString());
+            }
+        }
+    }
+}
