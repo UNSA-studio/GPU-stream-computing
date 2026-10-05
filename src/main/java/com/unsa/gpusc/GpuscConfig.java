@@ -21,7 +21,7 @@ public class GpuscConfig {
     public String workerName = "";
 
     // ---- client auto-worker (stage 3) ----
-    public boolean autoWorker = false;
+    public boolean autoWorker = true;
     public String workerDir = "gpusc_worker";
     public String workerPackUrl = "http://160.202.237.166:8090/gpusc-worker.zip";
     public boolean keepWorkerDir = false;
