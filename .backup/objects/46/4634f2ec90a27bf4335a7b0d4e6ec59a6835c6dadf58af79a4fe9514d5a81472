@@ -241,23 +241,8 @@ public final class ClientAutoWorker {
         HttpResponse<InputStream> resp = http.send(HttpRequest.newBuilder(URI.create(url))
                 .timeout(Duration.ofMinutes(30)).GET().build(), HttpResponse.BodyHandlers.ofInputStream());
         long total = resp.headers().firstValueAsLong("content-length").orElse(-1L);
-        try (InputStream in = resp.body();
-             java.io.OutputStream out = Files.newOutputStream(zip)) {
-            byte[] buf = new byte[1 << 20];
-            long read = 0L;
-            long lastLog = 0L;
-            int n;
-            long totalMb = total < 0 ? -1 : total / 1048576L;
-            while ((n = in.read(buf)) > 0) {
-                out.write(buf, 0, n);
-                read += n;
-                if (read - lastLog >= 20L * 1024 * 1024) {
-                    lastLog = read;
-                    long mb = read / 1048576L;
-                    GpuStreamComputing.LOGGER.info("[gpusc] 下载中 {} MB / {} MB", mb, totalMb < 0 ? -1 : totalMb);
-                    chat("§7[gpusc] 工人包下载中 " + mb + " / " + (totalMb < 0 ? "?" : totalMb) + " MB");
-                }
-            }
+        try (InputStream in = resp.body()) {
+            Files.copy(in, zip, StandardCopyOption.REPLACE_EXISTING);
         }
         long size = Files.size(zip);
         GpuStreamComputing.LOGGER.info("[gpusc] 下载完成: {} ({} MB / {} MB)",
