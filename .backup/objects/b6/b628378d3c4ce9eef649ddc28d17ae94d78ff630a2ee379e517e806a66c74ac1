@@ -131,17 +131,6 @@ public final class ClientAutoWorker {
         }
     }
 
-    private static boolean zipLooksValid(Path zip) {
-        try (java.util.zip.ZipFile zf = new java.util.zip.ZipFile(zip.toFile())) {
-            return zf.getEntry("libraries/net/neoforged/neoforge/21.1.250/win_args.txt") != null
-                    || zf.getEntry("libraries/net/neoforged/neoforge/21.1.250/unix_args.txt") != null
-                    || zf.getEntry("libraries/") != null;
-        } catch (Throwable t) {
-            GpuStreamComputing.LOGGER.warn("[gpusc] 工人包校验失败: {}", t.toString());
-            return false;
-        }
-    }
-
     /** split a command line into tokens, honouring double quotes and skipping blanks/comments */
     private static java.util.List<String> tokenize(String line) {
         java.util.List<String> out = new java.util.ArrayList<>();
