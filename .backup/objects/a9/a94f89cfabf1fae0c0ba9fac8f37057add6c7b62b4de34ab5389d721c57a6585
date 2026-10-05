@@ -99,52 +99,6 @@ public final class ClientAutoWorker {
         stopWorker(GpuStreamComputing.CONFIG);
     }
 
-    @SubscribeEvent
-    public static void onRegisterClientCommands(RegisterClientCommandsEvent event) {
-        event.getDispatcher().register(Commands.literal("gpuscworker")
-                .then(Commands.literal("start").executes(ctx -> {
-                    startManual();
-                    return 1;
-                }))
-                .then(Commands.literal("stop").executes(ctx -> {
-                    stopWorker(GpuStreamComputing.CONFIG);
-                    chat("§e[gpusc] 已停止后台工人");
-                    return 1;
-                }))
-                .then(Commands.literal("status").executes(ctx -> {
-                    boolean alive = process != null && process.isAlive();
-                    chat("§b[gpusc] 工人进程: " + (alive ? "运行中 pid=" + process.pid() : "未运行")
-                            + " ｜ 目录: " + workerDir(GpuStreamComputing.CONFIG));
-                    return 1;
-                })));
-    }
-
-    private static void chat(String s) {
-        try {
-            Minecraft mc = Minecraft.getInstance();
-            if (mc.player != null) {
-                mc.player.displayClientMessage(Component.literal(s), false);
-            }
-        } catch (Throwable ignored) {
-        }
-    }
-
-    private static void startManual() {
-        GpuscConfig cfg = GpuStreamComputing.CONFIG;
-        chat("§b[gpusc] 手动启动后台工人（忽略白名单）…");
-        Thread t = new Thread(() -> {
-            try {
-                startWorker(cfg);
-                chat("§a[gpusc] 工人已启动，日志: gpusc_worker/worker.log");
-            } catch (Throwable e) {
-                GpuStreamComputing.LOGGER.warn("[gpusc] 手动启动失败: {}", e.toString());
-                chat("§c[gpusc] 启动失败: " + e);
-            }
-        }, "gpusc-manual-worker");
-        t.setDaemon(true);
-        t.start();
-    }
-
     private static Path workerDir(GpuscConfig cfg) {
         String dir = (cfg.workerDir == null || cfg.workerDir.isBlank()) ? "gpusc_worker" : cfg.workerDir;
         Path p = Paths.get(dir);
