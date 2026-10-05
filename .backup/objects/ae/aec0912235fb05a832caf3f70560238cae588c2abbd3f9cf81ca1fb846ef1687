@@ -32,16 +32,12 @@ public class GpuStreamComputing {
         if ("coordinator".equalsIgnoreCase(CONFIG.role)) {
             SERVER = new DispatchServer(e.getServer(), JOBS, CONFIG);
             SERVER.start();
-        } else {
-            WORKER = new WorkerAgent(e.getServer(), CONFIG);
-            WORKER.start();
         }
         LOGGER.info("[gpusc] server started; jobs={}", JOBS.state.jobs.size());
     }
 
     private void onServerStopping(ServerStoppingEvent e) {
         if (SERVER != null) SERVER.stop();
-        if (WORKER != null) WORKER.stop();
         if (JOBS != null) JOBS.save();
     }
 }

@@ -41,7 +41,6 @@ public class GpuStreamComputing {
 
     private void onServerStopping(ServerStoppingEvent e) {
         if (SERVER != null) SERVER.stop();
-        if (WORKER != null) WORKER.stop();
         if (JOBS != null) JOBS.save();
     }
 }
