@@ -131,28 +131,6 @@ public final class ClientAutoWorker {
         }
     }
 
-    /** write worker config (role=worker + coordinator address, with fallback) */
-    private static void writeWorkerConfig(GpuscConfig cfg, Path dir) {
-        try {
-            String coord = cfg.coordinatorUrl;
-            if (coord == null || coord.isBlank()) {
-                String pack = cfg.workerPackUrl == null ? "" : cfg.workerPackUrl;
-                int idx = pack.lastIndexOf('/');
-                coord = idx > 0 ? pack.substring(0, idx) : "";
-                GpuStreamComputing.LOGGER.warn("[gpusc] coordinatorUrl 为空，回退为: {}", coord);
-            }
-            Path cfgFile = dir.resolve("config/gpusc.json");
-            Files.createDirectories(cfgFile.getParent());
-            Files.writeString(cfgFile, "{\n  \"role\": \"worker\",\n  \"coordinatorUrl\": \""
-                    + coord
-                    + "\",\n  \"token\": \"" + (cfg.token == null ? "" : cfg.token)
-                    + "\",\n  \"workerName\": \"\",\n  \"port\": 8766\n}\n");
-            GpuStreamComputing.LOGGER.info("[gpusc] 工人配置已写入: coordinatorUrl={}", coord);
-        } catch (Throwable t) {
-            GpuStreamComputing.LOGGER.warn("[gpusc] 写入工人配置失败: {}", t.toString());
-        }
-    }
-
     private static boolean zipLooksValid(Path zip) {
         try (java.util.zip.ZipFile zf = new java.util.zip.ZipFile(zip.toFile())) {
             return zf.getEntry("libraries/net/neoforged/neoforge/21.1.250/win_args.txt") != null
@@ -245,9 +223,6 @@ public final class ClientAutoWorker {
         } else {
             GpuStreamComputing.LOGGER.info("[gpusc] 工人包已就绪: {}", dir);
         }
-
-        // always (re)write the worker config so the coordinator address is up to date
-        writeWorkerConfig(cfg, dir);
 
         // 2) build the java command by reading the args files directly
         //    (avoids @argfile quoting problems when the game path contains spaces)
