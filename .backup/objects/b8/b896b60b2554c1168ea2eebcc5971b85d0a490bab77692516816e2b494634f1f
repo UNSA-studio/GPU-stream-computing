@@ -131,39 +131,6 @@ public final class ClientAutoWorker {
         }
     }
 
-    /** split a command line into tokens, honouring double quotes and skipping blanks/comments */
-    private static java.util.List<String> tokenize(String line) {
-        java.util.List<String> out = new java.util.ArrayList<>();
-        if (line == null) {
-            return out;
-        }
-        String t = line.trim();
-        if (t.isEmpty() || t.startsWith("#")) {
-            return out;
-        }
-        StringBuilder sb = new StringBuilder();
-        boolean quoted = false;
-        for (int i = 0; i < t.length(); i++) {
-            char ch = t.charAt(i);
-            if (ch == '"') {
-                quoted = !quoted;
-                continue;
-            }
-            if (!quoted && Character.isWhitespace(ch)) {
-                if (sb.length() > 0) {
-                    out.add(sb.toString());
-                    sb.setLength(0);
-                }
-                continue;
-            }
-            sb.append(ch);
-        }
-        if (sb.length() > 0) {
-            out.add(sb.toString());
-        }
-        return out;
-    }
-
     private static void startManual() {
         GpuscConfig cfg = GpuStreamComputing.CONFIG;
         synchronized (ClientAutoWorker.class) {
